@@ -1,10 +1,11 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 import torch
 import torch.nn as nn
 from torchvision import transforms
 from PIL import Image
 import io
+import requests
 
 # ---------------------------
 # Configuration
@@ -18,7 +19,7 @@ with open("classes.txt", "r") as f:
 num_classes = len(class_names)
 
 # ---------------------------
-# Model Definition (same as training)
+# Model Definition
 # ---------------------------
 class CNNModel(nn.Module):
     def __init__(self, num_classes):
@@ -68,12 +69,28 @@ app = FastAPI(title="Urban Issue Classification API")
 def root():
     return {"message": "Urban Issue CNN API is running!"}
 
+# ---------------------------
+# Updated /predict endpoint
+# ---------------------------
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(None), image_url: str = Form(None)):
     try:
-        image = Image.open(io.BytesIO(await file.read())).convert("RGB")
+        # 1️⃣ Get image bytes from file or URL
+        if file:
+            image_bytes = await file.read()
+        elif image_url:
+            response = requests.get(image_url)
+            if response.status_code != 200:
+                return JSONResponse({"error": "Failed to download image from URL"}, status_code=400)
+            image_bytes = response.content
+        else:
+            return JSONResponse({"error": "No image provided"}, status_code=400)
+
+        # 2️⃣ Process image
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         image = transform(image).unsqueeze(0).to(DEVICE)
 
+        # 3️⃣ Run through model
         with torch.no_grad():
             outputs = model(image)
             _, predicted = torch.max(outputs, 1)
